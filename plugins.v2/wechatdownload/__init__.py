@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 from urllib.parse import urlparse, urljoin
 from typing import Any, List, Dict, Tuple, Optional
 
@@ -16,7 +17,7 @@ class WechatDownload(_PluginBase):
     plugin_name = "微信添加种子"
     plugin_desc = "在微信中发送「/下载 URL [保存目录]」，快捷添加任务到下载器，可指定下载目录。也可使用 /xz /download 命令,使用方法同 /下载"
     plugin_icon = "wechatdownload.png"
-    plugin_version = "1.2.1"
+    plugin_version = "1.2.2"
     plugin_author = "leethrun"
     author_url = "https://github.com/leethrun"
     plugin_config_prefix = "wechatdownload_"
@@ -149,23 +150,32 @@ class WechatDownload(_PluginBase):
             # 第3步：站点名称
             site_name = self._get_site_name(hostname)
 
-            # 第4步：提交到下载器
+            # 第4步：识别媒体信息（TMDB/豆瓣），用于保存目录分类与消息海报/类别
+            mediainfo = self._recognize_media(page_info)
+
+            # 第5步：解析保存目录（消息未指定时按系统存储目录分类策略自动设置）
+            final_save_path = self._resolve_save_path(save_path, mediainfo)
+            if final_save_path != save_path:
+                logger.info(f"[微信添加种子] 保存目录自动设置为：{final_save_path}")
+
+            # 第6步：提交到下载器
             success_list = []
             fail_list = []
             for durl in download_urls:
-                if self._add_to_downloader(durl, save_path, cookie_str):
+                if self._add_to_downloader(durl, final_save_path, cookie_str):
                     success_list.append(durl)
                 else:
                     fail_list.append(durl)
 
-            # 第5步：回复结果
+            # 第7步：回复结果
             self._reply_success(
                 event_data,
                 site_name=site_name,
                 page_info=page_info,
+                mediainfo=mediainfo,
                 success=success_list,
                 fail=fail_list,
-                save_path=save_path,
+                save_path=final_save_path,
             )
 
         except Exception as e:
@@ -495,6 +505,55 @@ class WechatDownload(_PluginBase):
             logger.error(f"[微信添加种子] 添加下载任务异常：{e}", exc_info=True)
             return False
 
+    # ========== 媒体识别 ==========
+    def _recognize_media(self, page_info: Dict[str, Any]):
+        """识别媒体信息（TMDB/豆瓣），失败或无法识别时返回 None"""
+        try:
+            from app.core.metainfo import MetaInfo
+
+            seed_title = page_info.get("torrent_name") or page_info.get("title", "")
+            if not seed_title:
+                return None
+            meta = MetaInfo(title=seed_title, subtitle=page_info.get("subtitle", "") or seed_title)
+            return self.chain.recognize_media(meta=meta, cache=True)
+        except Exception as e:
+            logger.warning(f"[微信添加种子] 识别媒体信息失败：{e}")
+            return None
+
+    # ========== 保存目录解析 ==========
+    def _resolve_save_path(self, save_path: Optional[str], mediainfo) -> Optional[str]:
+        """
+        解析最终保存目录。
+        优先级：消息参数 > 系统存储目录（按「存储目录」分类策略自动匹配资源目录，
+        并按目录配置拼装类型/类别子目录）> 插件默认路径兜底。
+        """
+        # 消息参数已指定
+        if save_path:
+            return save_path
+        # 未指定时按系统「存储目录」分类策略自动设置
+        try:
+            from app.helper.directory import DirectoryHelper
+
+            dir_info = DirectoryHelper().get_dir(
+                mediainfo, storage="local", include_unsorted=True
+            )
+            if dir_info:
+                download_dir = Path(dir_info.download_path)
+                # 与官方下载链一致：目录未指定媒体类型且开启类型目录时拼一级子目录
+                if not dir_info.media_type and dir_info.download_type_folder \
+                        and mediainfo:
+                    download_dir = download_dir / mediainfo.type.value
+                # 目录未指定类别且开启类别目录时拼二级子目录
+                if not dir_info.media_category and dir_info.download_category_folder \
+                        and mediainfo and mediainfo.category:
+                    download_dir = download_dir / mediainfo.category
+                return str(download_dir)
+            logger.warning("[微信添加种子] 系统存储目录中未找到匹配的下载目录")
+        except Exception as e:
+            logger.warning(f"[微信添加种子] 按系统存储目录解析保存目录失败：{e}")
+        # 系统无匹配目录时回退插件默认路径
+        return self._qb_save_path or None
+
     # ========== 回复消息 ==========
     def _reply(self, event_data: dict, text: str, title: str = "下载助手", image: str = None):
         """通过 MoviePilot 消息系统回复用户，image 非空时以图文消息展示"""
@@ -523,14 +582,15 @@ class WechatDownload(_PluginBase):
         event_data: dict,
         site_name: str,
         page_info: Dict[str, Any],
+        mediainfo,
         success: list,
         fail: list,
         save_path: str = None,
     ):
         """
         成功添加任务后复用「设置-通知-资源下载」通知模板渲染回复消息。
-        识别媒体信息（TMDB/豆瓣）补齐海报与类别，刮取的种子信息（大小/发布时间/
-        做种/标签）与 MetaInfo 解析信息（小组/质量）一并注入模板上下文；
+        复用 on_command 中已识别的媒体信息（海报/类别），刮取的种子信息（大小/发布
+        时间/做种/标签）与 MetaInfo 解析信息（小组/质量）一并注入模板上下文；
         模板不可用或渲染为空时回退为默认文案。
         """
         # 全部失败时不使用模板，避免模板中「开始下载」文案产生误导
@@ -563,13 +623,6 @@ class WechatDownload(_PluginBase):
                 seeders=page_info.get("seeders") or 0,
                 labels=page_info.get("labels") or [],
             )
-
-            # 识别媒体信息（TMDB/豆瓣）：补齐海报、类别与规范的标题年份，失败不影响其余字段
-            mediainfo = None
-            try:
-                mediainfo = self.chain.recognize_media(meta=meta, cache=True)
-            except Exception as e:
-                logger.warning(f"[微信添加种子] 识别媒体信息失败，跳过海报与类别：{e}")
 
             # 消息不带 title/text，声明 ctype 后由系统用用户配置的模板填充；
             # 附带海报时微信以图文卡片展示，排版更接近官方下载通知
