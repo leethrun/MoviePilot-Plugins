@@ -1,6 +1,6 @@
-# 微信下载助手 (WechatDownload)
+# 微信添加种子任务 (WechatDownload)
 
-在微信（企业微信）中发送命令，自动获取站点 Cookie、解析下载链接并提交到 qBittorrent。
+在微信（企业微信）中发送命令，自动获取站点 Cookie、解析下载链接并提交到指定下载器（qBittorrent / Transmission）。
 
 ## 命令
 
@@ -45,5 +45,6 @@
 
 ## 版本历史
 
+- **v1.1.1**：插件更名为「微信添加种子任务」；点击插件卡片直接打开配置页（不再显示空白详情页）。
 - **v1.1.0**：配置页可选默认下载器（qbittorrent/transmission）；回复消息增加站点名称、种子副标题、质量信息（分辨率/媒介/编码）；成功文案改为「成功添加 N 个任务」。
 - **v1.0.0**：首个版本。支持微信命令触发、CookieCloud 取 Cookie、解析 NexusPHP/磁力/通用下载链接并提交到 qBittorrent。

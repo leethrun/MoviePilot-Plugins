@@ -13,10 +13,10 @@ from app.log import logger
 
 class WechatDownload(_PluginBase):
     # ========== 插件元数据 ==========
-    plugin_name = "微信下载助手"
+    plugin_name = "微信添加种子任务"
     plugin_desc = "在微信中发送「/下载 URL [保存目录]」，自动获取Cookie并提交下载到指定下载器"
     plugin_icon = "https://github.com/leethrun.png"
-    plugin_version = "1.1.0"
+    plugin_version = "1.1.1"
     plugin_author = "leethrun"
     author_url = "https://github.com/leethrun"
     plugin_config_prefix = "wechatdownload_"
@@ -38,7 +38,7 @@ class WechatDownload(_PluginBase):
             self._qb_save_path = config.get("qb_save_path", "")
             self._timeout = config.get("timeout", 30) or 30
         logger.info(
-            f"[微信下载助手] 插件初始化，启用状态：{self._enabled}，"
+            f"[微信添加种子任务] 插件初始化，启用状态：{self._enabled}，"
             f"下载器：{self._downloader or '自动'}"
         )
 
@@ -100,14 +100,14 @@ class WechatDownload(_PluginBase):
             return
 
         if not self._enabled:
-            self._reply(event_data, "❌ 微信下载助手未启用，请在插件设置中开启。")
+            self._reply(event_data, "❌ 微信添加种子任务未启用，请在插件设置中开启。")
             return
 
         # ---- 解析参数：URL + 可选的保存目录 ----
         args = event_data.get("arg_str") or event_data.get("args") or ""
         if isinstance(args, str):
             args = args.strip()
-        logger.info(f"[微信下载助手] 收到命令参数：{args!r}")
+        logger.info(f"[微信添加种子任务] 收到命令参数：{args!r}")
         if not args:
             self._reply(
                 event_data,
@@ -127,7 +127,7 @@ class WechatDownload(_PluginBase):
             return
 
         logger.info(
-            f"[微信下载助手] 收到下载请求：{target_url}，"
+            f"[微信添加种子任务] 收到下载请求：{target_url}，"
             f"保存目录：{save_path or '使用默认'}"
         )
 
@@ -136,9 +136,9 @@ class WechatDownload(_PluginBase):
             hostname = urlparse(target_url).hostname or ""
             cookie_str = self._get_cookie_from_cookiecloud(target_url)
             if cookie_str:
-                logger.info("[微信下载助手] 已获取站点 Cookie")
+                logger.info("[微信添加种子任务] 已获取站点 Cookie")
             else:
-                logger.warning("[微信下载助手] 未获取到站点 Cookie，尝试匿名访问")
+                logger.warning("[微信添加种子任务] 未获取到站点 Cookie，尝试匿名访问")
 
             # 第2步：解析下载链接 + 种子标题/副标题
             download_urls, page_info = self._extract_download_links(target_url, cookie_str)
@@ -171,7 +171,7 @@ class WechatDownload(_PluginBase):
             )
 
         except Exception as e:
-            logger.error(f"[微信下载助手] 处理异常：{e}", exc_info=True)
+            logger.error(f"[微信添加种子任务] 处理异常：{e}", exc_info=True)
             self._reply(event_data, f"❌ 处理失败：{str(e)}")
 
     # ========== CookieCloud 获取 Cookie ==========
@@ -185,9 +185,9 @@ class WechatDownload(_PluginBase):
             # 返回 (域名 -> "k=v; k2=v2" 字典, 错误信息)
             all_cookies, err = cc.download()
             if err:
-                logger.warning(f"[微信下载助手] CookieCloud 获取失败：{err}")
+                logger.warning(f"[微信添加种子任务] CookieCloud 获取失败：{err}")
             if not all_cookies:
-                logger.warning("[微信下载助手] CookieCloud 返回为空")
+                logger.warning("[微信添加种子任务] CookieCloud 返回为空")
                 return ""
 
             hostname = urlparse(url).hostname or ""
@@ -201,19 +201,19 @@ class WechatDownload(_PluginBase):
                         break
 
             if cookie_str:
-                logger.info(f"[微信下载助手] 已获取 {hostname} 的 Cookie")
+                logger.info(f"[微信添加种子任务] 已获取 {hostname} 的 Cookie")
             else:
                 logger.info(
-                    f"[微信下载助手] CookieCloud 中未找到 {hostname} 的 Cookie，"
+                    f"[微信添加种子任务] CookieCloud 中未找到 {hostname} 的 Cookie，"
                     f"可用域名：{list(all_cookies.keys())}"
                 )
             return cookie_str
 
         except ImportError:
-            logger.error("[微信下载助手] 无法导入 CookieCloudHelper")
+            logger.error("[微信添加种子任务] 无法导入 CookieCloudHelper")
             return ""
         except Exception as e:
-            logger.error(f"[微信下载助手] 获取 CookieCloud Cookie 失败：{e}")
+            logger.error(f"[微信添加种子任务] 获取 CookieCloud Cookie 失败：{e}")
             return ""
 
     # ========== 解析下载链接 ==========
@@ -237,7 +237,7 @@ class WechatDownload(_PluginBase):
             resp.raise_for_status()
             resp.encoding = resp.apparent_encoding or "utf-8"
         except Exception as e:
-            logger.error(f"[微信下载助手] 访问页面失败：{e}")
+            logger.error(f"[微信添加种子任务] 访问页面失败：{e}")
             raise RuntimeError(f"访问页面失败：{e}")
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -250,14 +250,14 @@ class WechatDownload(_PluginBase):
             href = a_tag["href"].strip()
             full_url = self._normalize_url(href, url)
             if full_url and "download.php" in full_url.lower():
-                logger.info(f"[微信下载助手] 找到 NexusPHP 下载链接：{full_url}")
+                logger.info(f"[微信添加种子任务] 找到 NexusPHP 下载链接：{full_url}")
                 return [full_url], {"title": title, "subtitle": subtitle}
 
         # ---- 第二优先级：magnet ----
         magnet_pattern = re.compile(r"magnet:\?xt=urn:btih:[a-zA-Z0-9]+[^\s\"'<>]*")
         magnets = magnet_pattern.findall(resp.text)
         if magnets:
-            logger.info("[微信下载助手] 找到 magnet 链接")
+            logger.info("[微信添加种子任务] 找到 magnet 链接")
             return [magnets[0]], {"title": title, "subtitle": subtitle}
 
         # ---- 第三优先级：通用 .torrent / download 参数 ----
@@ -265,10 +265,10 @@ class WechatDownload(_PluginBase):
             href = a_tag["href"].strip()
             full_url = self._normalize_url(href, url)
             if full_url and self._is_download_link(full_url):
-                logger.info(f"[微信下载助手] 找到通用下载链接：{full_url[:80]}...")
+                logger.info(f"[微信添加种子任务] 找到通用下载链接：{full_url[:80]}...")
                 return [full_url], {"title": title, "subtitle": subtitle}
 
-        logger.warning("[微信下载助手] 未找到任何下载链接")
+        logger.warning("[微信添加种子任务] 未找到任何下载链接")
         return [], {"title": title, "subtitle": subtitle}
 
     @staticmethod
@@ -326,7 +326,7 @@ class WechatDownload(_PluginBase):
             if site and site.name:
                 return site.name
         except Exception as e:
-            logger.warning(f"[微信下载助手] 查询站点名称失败：{e}")
+            logger.warning(f"[微信添加种子任务] 查询站点名称失败：{e}")
         return hostname
 
     def _normalize_url(self, href: str, base_url: str) -> str:
@@ -368,7 +368,7 @@ class WechatDownload(_PluginBase):
                 service = services.get(self._downloader)
                 if not service:
                     logger.error(
-                        f"[微信下载助手] 配置的下载器 {self._downloader} 不存在或未启用"
+                        f"[微信添加种子任务] 配置的下载器 {self._downloader} 不存在或未启用"
                     )
                     return False
                 server, server_name = service.instance, service.name
@@ -389,7 +389,7 @@ class WechatDownload(_PluginBase):
                         server, server_name = first[1].instance, first[0]
 
             if not server:
-                logger.error("[微信下载助手] 未找到可用的下载器")
+                logger.error("[微信添加种子任务] 未找到可用的下载器")
                 return False
 
             # qb/tr 的 add_torrent(content, download_dir, cookie) 签名兼容
@@ -401,16 +401,16 @@ class WechatDownload(_PluginBase):
 
             if result:
                 logger.info(
-                    f"[微信下载助手] 下载任务添加成功（下载器：{server_name}），"
+                    f"[微信添加种子任务] 下载任务添加成功（下载器：{server_name}），"
                     f"保存至：{final_save_path or '默认路径'}"
                 )
                 return True
 
-            logger.warning(f"[微信下载助手] 下载任务添加失败（下载器：{server_name}）")
+            logger.warning(f"[微信添加种子任务] 下载任务添加失败（下载器：{server_name}）")
             return False
 
         except Exception as e:
-            logger.error(f"[微信下载助手] 添加下载任务异常：{e}", exc_info=True)
+            logger.error(f"[微信添加种子任务] 添加下载任务异常：{e}", exc_info=True)
             return False
 
     # ========== 回复消息 ==========
@@ -419,7 +419,7 @@ class WechatDownload(_PluginBase):
         try:
             channel = event_data.get("channel")
             if not channel:
-                logger.warning("[微信下载助手] 无法获取回复渠道信息")
+                logger.warning("[微信添加种子任务] 无法获取回复渠道信息")
                 return
 
             # event_data 中的用户标识字段为 user（企业微信 FromUserName）
@@ -429,10 +429,10 @@ class WechatDownload(_PluginBase):
                 text=text,
                 userid=event_data.get("user"),
             )
-            logger.info("[微信下载助手] 已回复用户")
+            logger.info("[微信添加种子任务] 已回复用户")
 
         except Exception as e:
-            logger.error(f"[微信下载助手] 回复消息失败：{e}", exc_info=True)
+            logger.error(f"[微信添加种子任务] 回复消息失败：{e}", exc_info=True)
 
     @staticmethod
     def _build_quality_term(title: str) -> str:
@@ -448,7 +448,7 @@ class WechatDownload(_PluginBase):
             ]
             return " / ".join(t for t in terms if t)
         except Exception as e:
-            logger.warning(f"[微信下载助手] 识别质量信息失败：{e}")
+            logger.warning(f"[微信添加种子任务] 识别质量信息失败：{e}")
             return ""
 
     def _build_reply_msg(
@@ -578,5 +578,7 @@ class WechatDownload(_PluginBase):
         )
 
     def get_page(self) -> Optional[List[dict]]:
-        """插件详情页，本插件不需要"""
-        return None
+        """
+        插件详情页：不实现（仅保留 docstring），
+        使 has_page=False，点击插件卡片时前端直接打开配置页。
+        """

@@ -6,7 +6,7 @@
 
 | 插件 ID | 名称 | 简介 | 版本 |
 | --- | --- | --- | --- |
-| `WechatDownload` | 微信下载助手 | 微信发送「/下载 URL [保存目录]」，自动取 Cookie 并提交到 qBittorrent | 1.0.0 |
+| `WechatDownload` | 微信添加种子任务 | 微信发送「/下载 URL [保存目录]」，自动取 Cookie 并提交到指定下载器 | 1.1.1 |
 
 ## 如何接入 MoviePilot
 
