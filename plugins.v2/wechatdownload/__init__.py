@@ -13,10 +13,10 @@ from app.log import logger
 
 class WechatDownload(_PluginBase):
     # ========== 插件元数据 ==========
-    plugin_name = "微信添加种子任务"
-    plugin_desc = "在微信中发送「/下载 URL [保存目录]」，自动获取Cookie并提交下载到指定下载器"
-    plugin_icon = "https://raw.githubusercontent.com/leethrun/MoviePilot-Plugins/main/icons/wechatdownload.png"
-    plugin_version = "1.1.1"
+    plugin_name = "微信添加种子"
+    plugin_desc = "在微信中发送「/下载 URL [保存目录]」，快捷添加任务到下载器，可指定下载目录。也可使用 /xz /download 命令,使用方法同 /下载"
+    plugin_icon = "wechatdownload.png"
+    plugin_version = "1.2.0"
     plugin_author = "leethrun"
     author_url = "https://github.com/leethrun"
     plugin_config_prefix = "wechatdownload_"
@@ -38,7 +38,7 @@ class WechatDownload(_PluginBase):
             self._qb_save_path = config.get("qb_save_path", "")
             self._timeout = config.get("timeout", 30) or 30
         logger.info(
-            f"[微信添加种子任务] 插件初始化，启用状态：{self._enabled}，"
+            f"[微信添加种子] 插件初始化，启用状态：{self._enabled}，"
             f"下载器：{self._downloader or '自动'}"
         )
 
@@ -100,14 +100,14 @@ class WechatDownload(_PluginBase):
             return
 
         if not self._enabled:
-            self._reply(event_data, "❌ 微信添加种子任务未启用，请在插件设置中开启。")
+            self._reply(event_data, "❌ 微信添加种子未启用，请在插件设置中开启。")
             return
 
         # ---- 解析参数：URL + 可选的保存目录 ----
         args = event_data.get("arg_str") or event_data.get("args") or ""
         if isinstance(args, str):
             args = args.strip()
-        logger.info(f"[微信添加种子任务] 收到命令参数：{args!r}")
+        logger.info(f"[微信添加种子] 收到命令参数：{args!r}")
         if not args:
             self._reply(
                 event_data,
@@ -127,7 +127,7 @@ class WechatDownload(_PluginBase):
             return
 
         logger.info(
-            f"[微信添加种子任务] 收到下载请求：{target_url}，"
+            f"[微信添加种子] 收到下载请求：{target_url}，"
             f"保存目录：{save_path or '使用默认'}"
         )
 
@@ -136,9 +136,9 @@ class WechatDownload(_PluginBase):
             hostname = urlparse(target_url).hostname or ""
             cookie_str = self._get_cookie_from_cookiecloud(target_url)
             if cookie_str:
-                logger.info("[微信添加种子任务] 已获取站点 Cookie")
+                logger.info("[微信添加种子] 已获取站点 Cookie")
             else:
-                logger.warning("[微信添加种子任务] 未获取到站点 Cookie，尝试匿名访问")
+                logger.warning("[微信添加种子] 未获取到站点 Cookie，尝试匿名访问")
 
             # 第2步：解析下载链接 + 种子标题/副标题
             download_urls, page_info = self._extract_download_links(target_url, cookie_str)
@@ -159,19 +159,17 @@ class WechatDownload(_PluginBase):
                     fail_list.append(durl)
 
             # 第5步：回复结果
-            self._reply(
+            self._reply_success(
                 event_data,
-                self._build_reply_msg(
-                    site_name=site_name,
-                    page_info=page_info,
-                    success=success_list,
-                    fail=fail_list,
-                    save_path=save_path,
-                )
+                site_name=site_name,
+                page_info=page_info,
+                success=success_list,
+                fail=fail_list,
+                save_path=save_path,
             )
 
         except Exception as e:
-            logger.error(f"[微信添加种子任务] 处理异常：{e}", exc_info=True)
+            logger.error(f"[微信添加种子] 处理异常：{e}", exc_info=True)
             self._reply(event_data, f"❌ 处理失败：{str(e)}")
 
     # ========== CookieCloud 获取 Cookie ==========
@@ -185,9 +183,9 @@ class WechatDownload(_PluginBase):
             # 返回 (域名 -> "k=v; k2=v2" 字典, 错误信息)
             all_cookies, err = cc.download()
             if err:
-                logger.warning(f"[微信添加种子任务] CookieCloud 获取失败：{err}")
+                logger.warning(f"[微信添加种子] CookieCloud 获取失败：{err}")
             if not all_cookies:
-                logger.warning("[微信添加种子任务] CookieCloud 返回为空")
+                logger.warning("[微信添加种子] CookieCloud 返回为空")
                 return ""
 
             hostname = urlparse(url).hostname or ""
@@ -201,19 +199,19 @@ class WechatDownload(_PluginBase):
                         break
 
             if cookie_str:
-                logger.info(f"[微信添加种子任务] 已获取 {hostname} 的 Cookie")
+                logger.info(f"[微信添加种子] 已获取 {hostname} 的 Cookie")
             else:
                 logger.info(
-                    f"[微信添加种子任务] CookieCloud 中未找到 {hostname} 的 Cookie，"
+                    f"[微信添加种子] CookieCloud 中未找到 {hostname} 的 Cookie，"
                     f"可用域名：{list(all_cookies.keys())}"
                 )
             return cookie_str
 
         except ImportError:
-            logger.error("[微信添加种子任务] 无法导入 CookieCloudHelper")
+            logger.error("[微信添加种子] 无法导入 CookieCloudHelper")
             return ""
         except Exception as e:
-            logger.error(f"[微信添加种子任务] 获取 CookieCloud Cookie 失败：{e}")
+            logger.error(f"[微信添加种子] 获取 CookieCloud Cookie 失败：{e}")
             return ""
 
     # ========== 解析下载链接 ==========
@@ -237,7 +235,7 @@ class WechatDownload(_PluginBase):
             resp.raise_for_status()
             resp.encoding = resp.apparent_encoding or "utf-8"
         except Exception as e:
-            logger.error(f"[微信添加种子任务] 访问页面失败：{e}")
+            logger.error(f"[微信添加种子] 访问页面失败：{e}")
             raise RuntimeError(f"访问页面失败：{e}")
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -250,14 +248,14 @@ class WechatDownload(_PluginBase):
             href = a_tag["href"].strip()
             full_url = self._normalize_url(href, url)
             if full_url and "download.php" in full_url.lower():
-                logger.info(f"[微信添加种子任务] 找到 NexusPHP 下载链接：{full_url}")
+                logger.info(f"[微信添加种子] 找到 NexusPHP 下载链接：{full_url}")
                 return [full_url], {"title": title, "subtitle": subtitle}
 
         # ---- 第二优先级：magnet ----
         magnet_pattern = re.compile(r"magnet:\?xt=urn:btih:[a-zA-Z0-9]+[^\s\"'<>]*")
         magnets = magnet_pattern.findall(resp.text)
         if magnets:
-            logger.info("[微信添加种子任务] 找到 magnet 链接")
+            logger.info("[微信添加种子] 找到 magnet 链接")
             return [magnets[0]], {"title": title, "subtitle": subtitle}
 
         # ---- 第三优先级：通用 .torrent / download 参数 ----
@@ -265,10 +263,10 @@ class WechatDownload(_PluginBase):
             href = a_tag["href"].strip()
             full_url = self._normalize_url(href, url)
             if full_url and self._is_download_link(full_url):
-                logger.info(f"[微信添加种子任务] 找到通用下载链接：{full_url[:80]}...")
+                logger.info(f"[微信添加种子] 找到通用下载链接：{full_url[:80]}...")
                 return [full_url], {"title": title, "subtitle": subtitle}
 
-        logger.warning("[微信添加种子任务] 未找到任何下载链接")
+        logger.warning("[微信添加种子] 未找到任何下载链接")
         return [], {"title": title, "subtitle": subtitle}
 
     @staticmethod
@@ -326,7 +324,7 @@ class WechatDownload(_PluginBase):
             if site and site.name:
                 return site.name
         except Exception as e:
-            logger.warning(f"[微信添加种子任务] 查询站点名称失败：{e}")
+            logger.warning(f"[微信添加种子] 查询站点名称失败：{e}")
         return hostname
 
     def _normalize_url(self, href: str, base_url: str) -> str:
@@ -368,7 +366,7 @@ class WechatDownload(_PluginBase):
                 service = services.get(self._downloader)
                 if not service:
                     logger.error(
-                        f"[微信添加种子任务] 配置的下载器 {self._downloader} 不存在或未启用"
+                        f"[微信添加种子] 配置的下载器 {self._downloader} 不存在或未启用"
                     )
                     return False
                 server, server_name = service.instance, service.name
@@ -389,7 +387,7 @@ class WechatDownload(_PluginBase):
                         server, server_name = first[1].instance, first[0]
 
             if not server:
-                logger.error("[微信添加种子任务] 未找到可用的下载器")
+                logger.error("[微信添加种子] 未找到可用的下载器")
                 return False
 
             # qb/tr 的 add_torrent(content, download_dir, cookie) 签名兼容
@@ -401,38 +399,104 @@ class WechatDownload(_PluginBase):
 
             if result:
                 logger.info(
-                    f"[微信添加种子任务] 下载任务添加成功（下载器：{server_name}），"
+                    f"[微信添加种子] 下载任务添加成功（下载器：{server_name}），"
                     f"保存至：{final_save_path or '默认路径'}"
                 )
                 return True
 
-            logger.warning(f"[微信添加种子任务] 下载任务添加失败（下载器：{server_name}）")
+            logger.warning(f"[微信添加种子] 下载任务添加失败（下载器：{server_name}）")
             return False
 
         except Exception as e:
-            logger.error(f"[微信添加种子任务] 添加下载任务异常：{e}", exc_info=True)
+            logger.error(f"[微信添加种子] 添加下载任务异常：{e}", exc_info=True)
             return False
 
     # ========== 回复消息 ==========
-    def _reply(self, event_data: dict, text: str):
+    def _reply(self, event_data: dict, text: str, title: str = "下载助手"):
         """通过 MoviePilot 消息系统回复用户"""
         try:
             channel = event_data.get("channel")
             if not channel:
-                logger.warning("[微信添加种子任务] 无法获取回复渠道信息")
+                logger.warning("[微信添加种子] 无法获取回复渠道信息")
                 return
 
             # event_data 中的用户标识字段为 user（企业微信 FromUserName）
             self.post_message(
                 channel=channel,
-                title="下载助手",
+                title=title,
                 text=text,
                 userid=event_data.get("user"),
             )
-            logger.info("[微信添加种子任务] 已回复用户")
+            logger.info("[微信添加种子] 已回复用户")
 
         except Exception as e:
-            logger.error(f"[微信添加种子任务] 回复消息失败：{e}", exc_info=True)
+            logger.error(f"[微信添加种子] 回复消息失败：{e}", exc_info=True)
+
+    # ========== 成功消息（复用系统通知模板） ==========
+    def _reply_success(
+        self,
+        event_data: dict,
+        site_name: str,
+        page_info: Dict[str, str],
+        success: list,
+        fail: list,
+        save_path: str = None,
+    ):
+        """
+        成功添加任务后复用「设置-通知-资源下载」通知模板渲染回复消息。
+        优先用 MetaInfo + TorrentInfo 构建上下文交给系统模板渲染，
+        模板不可用或渲染为空时回退为默认文案。
+        """
+        # 全部失败时不使用模板，避免模板中「开始下载」文案产生误导
+        if not success:
+            self._reply(event_data, self._build_reply_msg(
+                site_name=site_name,
+                page_info=page_info,
+                success=success,
+                fail=fail,
+                save_path=save_path,
+            ))
+            return
+
+        try:
+            from app.helper.message import MessageTemplateHelper
+            from app.schemas.types import ContentType
+            from app.schemas import Notification
+            from app.core.context import TorrentInfo
+            from app.core.metainfo import MetaInfo
+
+            seed_title = page_info.get("title", "")
+            subtitle = page_info.get("subtitle", "") or seed_title
+            meta = MetaInfo(title=seed_title, subtitle=subtitle)
+            torrentinfo = TorrentInfo(
+                title=seed_title,
+                description=subtitle,
+                site_name=site_name,
+            )
+            # 消息不带 title/text，声明 ctype 后由系统用用户配置的模板填充
+            notification = Notification(ctype=ContentType.DownloadAdded)
+            notification = MessageTemplateHelper.render(
+                notification, meta=meta, torrentinfo=torrentinfo
+            )
+            if notification and (notification.title or notification.text):
+                self._reply(
+                    event_data,
+                    notification.text or "",
+                    title=notification.title or "下载助手",
+                )
+                return
+
+            logger.warning("[微信添加种子] 通知模板渲染结果为空，回退默认文案")
+        except Exception as e:
+            logger.warning(f"[微信添加种子] 复用通知模板失败，回退默认文案：{e}")
+
+        self._reply(event_data, self._build_reply_msg(
+            site_name=site_name,
+            page_info=page_info,
+            success=success,
+            fail=fail,
+            save_path=save_path,
+        ))
 
     @staticmethod
     def _build_quality_term(title: str) -> str:
@@ -448,7 +512,7 @@ class WechatDownload(_PluginBase):
             ]
             return " / ".join(t for t in terms if t)
         except Exception as e:
-            logger.warning(f"[微信添加种子任务] 识别质量信息失败：{e}")
+            logger.warning(f"[微信添加种子] 识别质量信息失败：{e}")
             return ""
 
     def _build_reply_msg(

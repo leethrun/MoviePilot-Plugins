@@ -1,18 +1,18 @@
 {
   "WechatDownload": {
-    "name": "微信添加种子任务",
-    "description": "在微信中发送「/下载 URL [保存目录]」，自动从 CookieCloud 获取站点 Cookie，解析页面下载链接并提交到指定下载器，回复包含站点、副标题与质量信息。",
+    "name": "微信添加种子",
+    "description": "在微信中发送「/下载 URL [保存目录]」，快捷添加任务到下载器，可指定下载目录。也可使用 /xz /download 命令,使用方法同 /下载",
     "labels": "下载管理,微信",
     "version": "1.2.0",
-    "icon": "https://raw.githubusercontent.com/leethrun/MoviePilot-Plugins/main/icons/wechatdownload.png",
+    "icon": "wechatdownload.png",
     "author": "leethrun",
     "level": 1,
     "system_version": ">=2.8.0,<3",
     "release": false,
     "history": {
-      "v1.2.0": "新增：回复消息增加站点名称、种子副标题、质量信息（分辨率/媒介/编码）；成功文案改为「成功添加 N 个任务」。",
-      "v1.1.0": "新增：配置页可选默认下载器（qbittorrent/transmission）；",
-      "v1.0.0": "支持微信命令触发，CookieCloud 取 Cookie，解析 NexusPHP/磁力/通用下载链接并提交到 qBittorrent。"
+      "v1.2.0": "优化消息模板",
+      "v1.1.0": "新增：设置默认下载器",
+      "v1.0.0": "在微信中发送「/下载 URL [保存目录]」，快捷添加任务到下载器，可指定下载目录。也可使用 /xz /download 命令,使用方法同 /下载"
     }
   }
 }

@@ -6,7 +6,7 @@
 
 | 插件 ID | 名称 | 简介 | 版本 |
 | --- | --- | --- | --- |
-| `WechatDownload` | 微信添加种子任务 | 微信发送「/下载 URL [保存目录]」，自动取 Cookie 并提交到指定下载器 | 1.1.1 |
+| `WechatDownload` | 微信添加种子 | 在微信中发送「/下载 URL [保存目录]」，快捷添加任务到下载器，可指定下载目录。也可使用 /xz /download 命令,使用方法同 /下载 | 1.2.0 |
 
 ## 如何接入 MoviePilot
 
@@ -24,7 +24,7 @@
 
    多个地址使用英文逗号分隔，地址以 `/` 结尾时可省略。
 
-2. 保存后重启/刷新，进入 **插件市场**，搜索“微信下载助手”并安装、启用。
+2. 保存后重启/刷新，进入 **插件市场**，搜索“微信添加种子”并安装、启用。
 
 ## 目录结构
 
@@ -34,7 +34,8 @@ MoviePilot-Plugins/
 │   └── wechatdownload/
 │       ├── __init__.py
 │       ├── requirements.txt
-│       └── README.md
+│       ├── README.md
+│       └── wechatdownload.png
 ├── icons/                     # 插件图标
 ├── package.v2.json            # V2 插件市场索引
 └── README.md
