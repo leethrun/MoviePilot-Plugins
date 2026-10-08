@@ -49,4 +49,3 @@ MoviePilot-Plugins/
 ## 说明
 
 - 本仓库仅提供 V2 版本插件，适配 MoviePilot V2。
-- 图标使用作者 GitHub 头像：<https://github.com/leethrun.png>。
