@@ -4,7 +4,7 @@
     "description": "在微信中发送「/下载 URL [保存目录]」，自动从 CookieCloud 获取站点 Cookie，解析页面下载链接并提交到指定下载器，回复包含站点、副标题与质量信息。",
     "labels": "下载管理,微信",
     "version": "1.1.1",
-    "icon": "https://github.com/leethrun/MoviePilot-Plugins/blob/main/icons/wechatdownload.png",
+    "icon": "https://raw.githubusercontent.com/leethrun/MoviePilot-Plugins/main/icons/wechatdownload.png",
     "author": "leethrun",
     "level": 1,
     "system_version": ">=2.8.0,<3",

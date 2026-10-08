@@ -15,7 +15,7 @@ class WechatDownload(_PluginBase):
     # ========== 插件元数据 ==========
     plugin_name = "微信添加种子任务"
     plugin_desc = "在微信中发送「/下载 URL [保存目录]」，自动获取Cookie并提交下载到指定下载器"
-    plugin_icon = "https://github.com/leethrun.png"
+    plugin_icon = "https://raw.githubusercontent.com/leethrun/MoviePilot-Plugins/main/icons/wechatdownload.png"
     plugin_version = "1.1.1"
     plugin_author = "leethrun"
     author_url = "https://github.com/leethrun"
