@@ -16,7 +16,7 @@ class WechatDownload(_PluginBase):
     plugin_name = "微信添加种子"
     plugin_desc = "在微信中发送「/下载 URL [保存目录]」，快捷添加任务到下载器，可指定下载目录。也可使用 /xz /download 命令,使用方法同 /下载"
     plugin_icon = "wechatdownload.png"
-    plugin_version = "1.2.0"
+    plugin_version = "1.2.1"
     plugin_author = "leethrun"
     author_url = "https://github.com/leethrun"
     plugin_config_prefix = "wechatdownload_"
@@ -215,10 +215,10 @@ class WechatDownload(_PluginBase):
             return ""
 
     # ========== 解析下载链接 ==========
-    def _extract_download_links(self, url: str, cookie_str: str) -> Tuple[List[str], Dict[str, str]]:
+    def _extract_download_links(self, url: str, cookie_str: str) -> Tuple[List[str], Dict[str, Any]]:
         """
-        解析页面下载链接，同时提取种子标题与副标题。
-        :return: (下载链接列表, {"title": 种子名, "subtitle": 副标题})
+        解析页面下载链接，同时提取种子信息。
+        :return: (下载链接列表, 页面信息字典)
         """
         headers = {
             "User-Agent": (
@@ -240,8 +240,8 @@ class WechatDownload(_PluginBase):
 
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # ---- 提取种子标题/副标题 ----
-        title, subtitle = self._parse_page_info(soup)
+        # ---- 提取种子信息（标题/副标题/大小/发布时间/做种/标签等） ----
+        page_info = self._parse_page_info(soup)
 
         # ---- 第一优先级：NexusPHP 的 download.php ----
         for a_tag in soup.find_all("a", href=True):
@@ -249,14 +249,14 @@ class WechatDownload(_PluginBase):
             full_url = self._normalize_url(href, url)
             if full_url and "download.php" in full_url.lower():
                 logger.info(f"[微信添加种子] 找到 NexusPHP 下载链接：{full_url}")
-                return [full_url], {"title": title, "subtitle": subtitle}
+                return [full_url], page_info
 
         # ---- 第二优先级：magnet ----
         magnet_pattern = re.compile(r"magnet:\?xt=urn:btih:[a-zA-Z0-9]+[^\s\"'<>]*")
         magnets = magnet_pattern.findall(resp.text)
         if magnets:
             logger.info("[微信添加种子] 找到 magnet 链接")
-            return [magnets[0]], {"title": title, "subtitle": subtitle}
+            return [magnets[0]], page_info
 
         # ---- 第三优先级：通用 .torrent / download 参数 ----
         for a_tag in soup.find_all("a", href=True):
@@ -264,10 +264,10 @@ class WechatDownload(_PluginBase):
             full_url = self._normalize_url(href, url)
             if full_url and self._is_download_link(full_url):
                 logger.info(f"[微信添加种子] 找到通用下载链接：{full_url[:80]}...")
-                return [full_url], {"title": title, "subtitle": subtitle}
+                return [full_url], page_info
 
         logger.warning("[微信添加种子] 未找到任何下载链接")
-        return [], {"title": title, "subtitle": subtitle}
+        return [], page_info
 
     @staticmethod
     def _clean_text(text: str, max_len: int = 120) -> str:
@@ -277,10 +277,12 @@ class WechatDownload(_PluginBase):
         cleaned = re.sub(r"\s+", " ", text).strip()
         return cleaned[:max_len] + ("..." if len(cleaned) > max_len else "")
 
-    def _parse_page_info(self, soup: BeautifulSoup) -> Tuple[str, str]:
+    def _parse_page_info(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """
-        从详情页提取种子标题与副标题（NexusPHP 结构为主，多级回退）。
+        从详情页提取种子信息（NexusPHP 结构为主，多级回退）。
         副标题取不到时回退为种子标题。
+        :return: 字典：title（展示名）、subtitle（副标题）、torrent_name（完整种子名）、
+                 size（字节数）、pubdate（发布时间）、seeders（做种数）、labels（标签列表）
         """
         title = ""
         page_title = soup.title.get_text(strip=True) if soup.title else ""
@@ -298,6 +300,16 @@ class WechatDownload(_PluginBase):
         if not title and page_title:
             title = self._clean_text(page_title.split("::")[0], 200)
 
+        # 完整种子名：优先取 h1 全名（含制作组等原始信息，便于解析小组/质量），回退展示名
+        torrent_name = ""
+        h1 = soup.find("h1")
+        if h1:
+            torrent_name = self._clean_text(
+                re.split(r"\[\d+%?\]", h1.get_text(strip=True))[0], 300
+            )
+        if not torrent_name:
+            torrent_name = title
+
         subtitle = ""
         # 副标题：NexusPHP 简介区常见结构，多级回退
         sub_node = (
@@ -313,7 +325,79 @@ class WechatDownload(_PluginBase):
         if not subtitle:
             subtitle = title
 
-        return title, subtitle
+        # ---- 表格信息：大小 / 发布时间 / 做种 / 标签 ----
+        size_text, pubdate, seeders_text = "", "", ""
+        labels: List[str] = []
+        for tr in soup.find_all("tr"):
+            head = tr.find("td", class_=re.compile(r"rowhead", re.I))
+            if head is None:
+                continue
+            value_td = head.find_next_sibling("td")
+            if value_td is None:
+                continue
+            label = head.get_text(strip=True)
+            value = value_td.get_text(" ", strip=True)
+            if not value:
+                continue
+            if not size_text and re.search(r"大小|容量|size", label, re.I) \
+                    and re.search(r"[\d.,]+\s*[KMGTPE]?i?B", value, re.I):
+                size_text = value
+            elif not pubdate and re.search(r"添加于|添加时间|发布时间|added|created", label, re.I):
+                pubdate = value
+            elif not seeders_text and re.search(r"做种|seeders?", label, re.I):
+                seeders_text = value
+            elif re.search(r"^标签|tags?$", label, re.I):
+                # 标签行：按分隔符拆分为列表
+                for token in re.split(r"[/,，|;；]|\s{2,}", value):
+                    token = token.strip()
+                    if token and token not in labels:
+                        labels.append(token)
+
+        # 促销/属性徽章（NexusPHP：img.pro_free / pro_2up / pro_50pct 等）
+        for img in soup.find_all("img", class_=re.compile(r"^pro_", re.I)):
+            name = (img.get("alt") or img.get("title") or "").strip()
+            if name and name not in labels:
+                labels.append(name)
+
+        # 做种数：取值中首个整数（如 "123 aaa: xxx"）
+        seeders = None
+        if seeders_text:
+            m = re.search(r"\d+", seeders_text)
+            if m:
+                seeders = int(m.group())
+
+        return {
+            "title": title,
+            "subtitle": subtitle,
+            "torrent_name": torrent_name,
+            "size": self._parse_size_to_bytes(size_text),
+            "pubdate": pubdate or None,
+            "seeders": seeders,
+            "labels": labels,
+        }
+
+    @staticmethod
+    def _parse_size_to_bytes(size_text: str) -> Optional[float]:
+        """将 "4.37 GiB" 之类的大小文本换算为字节数，无法解析时返回 None"""
+        if not size_text:
+            return None
+        m = re.search(r"([\d.,]+)\s*([KMGTPE])?(i?)B", size_text.replace(",", ""), re.I)
+        if not m:
+            return None
+        try:
+            value = float(m.group(1))
+        except ValueError:
+            return None
+        unit = m.group(2).upper() if m.group(2) else ""
+        if m.group(3):
+            # 二进制单位（GiB/MiB/...）
+            factors = {"": 1, "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3,
+                       "T": 1024 ** 4, "P": 1024 ** 5, "E": 1024 ** 6}
+        else:
+            # 十进制单位（GB/MB/...）
+            factors = {"": 1, "K": 1000, "M": 1000 ** 2, "G": 1000 ** 3,
+                       "T": 1000 ** 4, "P": 1000 ** 5, "E": 1000 ** 6}
+        return value * factors[unit]
 
     def _get_site_name(self, hostname: str) -> str:
         """获取站点名称：站点表 -> 返回主机名兜底"""
@@ -412,8 +496,8 @@ class WechatDownload(_PluginBase):
             return False
 
     # ========== 回复消息 ==========
-    def _reply(self, event_data: dict, text: str, title: str = "下载助手"):
-        """通过 MoviePilot 消息系统回复用户"""
+    def _reply(self, event_data: dict, text: str, title: str = "下载助手", image: str = None):
+        """通过 MoviePilot 消息系统回复用户，image 非空时以图文消息展示"""
         try:
             channel = event_data.get("channel")
             if not channel:
@@ -425,6 +509,7 @@ class WechatDownload(_PluginBase):
                 channel=channel,
                 title=title,
                 text=text,
+                image=image,
                 userid=event_data.get("user"),
             )
             logger.info("[微信添加种子] 已回复用户")
@@ -437,14 +522,15 @@ class WechatDownload(_PluginBase):
         self,
         event_data: dict,
         site_name: str,
-        page_info: Dict[str, str],
+        page_info: Dict[str, Any],
         success: list,
         fail: list,
         save_path: str = None,
     ):
         """
         成功添加任务后复用「设置-通知-资源下载」通知模板渲染回复消息。
-        优先用 MetaInfo + TorrentInfo 构建上下文交给系统模板渲染，
+        识别媒体信息（TMDB/豆瓣）补齐海报与类别，刮取的种子信息（大小/发布时间/
+        做种/标签）与 MetaInfo 解析信息（小组/质量）一并注入模板上下文；
         模板不可用或渲染为空时回退为默认文案。
         """
         # 全部失败时不使用模板，避免模板中「开始下载」文案产生误导
@@ -465,24 +551,44 @@ class WechatDownload(_PluginBase):
             from app.core.context import TorrentInfo
             from app.core.metainfo import MetaInfo
 
-            seed_title = page_info.get("title", "")
+            seed_title = page_info.get("torrent_name") or page_info.get("title", "")
             subtitle = page_info.get("subtitle", "") or seed_title
             meta = MetaInfo(title=seed_title, subtitle=subtitle)
             torrentinfo = TorrentInfo(
                 title=seed_title,
                 description=subtitle,
                 site_name=site_name,
+                size=page_info.get("size") or 0.0,
+                pubdate=page_info.get("pubdate"),
+                seeders=page_info.get("seeders") or 0,
+                labels=page_info.get("labels") or [],
             )
-            # 消息不带 title/text，声明 ctype 后由系统用用户配置的模板填充
-            notification = Notification(ctype=ContentType.DownloadAdded)
+
+            # 识别媒体信息（TMDB/豆瓣）：补齐海报、类别与规范的标题年份，失败不影响其余字段
+            mediainfo = None
+            try:
+                mediainfo = self.chain.recognize_media(meta=meta, cache=True)
+            except Exception as e:
+                logger.warning(f"[微信添加种子] 识别媒体信息失败，跳过海报与类别：{e}")
+
+            # 消息不带 title/text，声明 ctype 后由系统用用户配置的模板填充；
+            # 附带海报时微信以图文卡片展示，排版更接近官方下载通知
+            notification = Notification(
+                ctype=ContentType.DownloadAdded,
+                image=mediainfo.get_message_image() if mediainfo else None,
+            )
             notification = MessageTemplateHelper.render(
-                notification, meta=meta, torrentinfo=torrentinfo
+                notification,
+                meta=meta,
+                mediainfo=mediainfo,
+                torrentinfo=torrentinfo,
             )
             if notification and (notification.title or notification.text):
                 self._reply(
                     event_data,
                     notification.text or "",
                     title=notification.title or "下载助手",
+                    image=notification.image,
                 )
                 return
 
@@ -518,7 +624,7 @@ class WechatDownload(_PluginBase):
     def _build_reply_msg(
         self,
         site_name: str,
-        page_info: Dict[str, str],
+        page_info: Dict[str, Any],
         success: list,
         fail: list,
         save_path: str = None,
