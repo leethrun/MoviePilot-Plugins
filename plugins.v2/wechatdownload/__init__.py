@@ -17,7 +17,7 @@ class WechatDownload(_PluginBase):
     plugin_name = "微信添加种子"
     plugin_desc = "在微信中发送「/下载 URL [保存目录]」，快捷添加任务到下载器，可指定下载目录。也可使用 /xz /download 命令,使用方法同 /下载"
     plugin_icon = "wechatdownload.png"
-    plugin_version = "1.2.2"
+    plugin_version = "1.2.3"
     plugin_author = "leethrun"
     author_url = "https://github.com/leethrun"
     plugin_config_prefix = "wechatdownload_"
@@ -133,16 +133,31 @@ class WechatDownload(_PluginBase):
         )
 
         try:
-            # 第1步：从 CookieCloud 获取 Cookie
             hostname = urlparse(target_url).hostname or ""
-            cookie_str = self._get_cookie_from_cookiecloud(target_url)
-            if cookie_str:
-                logger.info("[微信添加种子] 已获取站点 Cookie")
-            else:
+
+            # 第1步：获取站点信息与 Cookie（站点表优先，CookieCloud 回退）
+            site = self._get_site_info(hostname)
+            cookie_str = ""
+            if site is not None and site.cookie:
+                cookie_str = site.cookie
+                logger.info(f"[微信添加种子] 使用站点表 Cookie：{hostname}")
+            if not cookie_str:
+                cookie_str = self._get_cookie_from_cookiecloud(target_url)
+                if cookie_str:
+                    logger.info("[微信添加种子] 使用 CookieCloud Cookie")
+            if not cookie_str:
                 logger.warning("[微信添加种子] 未获取到站点 Cookie，尝试匿名访问")
 
+            # APIKey 站点（如 HDDolby）：通过官方 API 获取下载链，不依赖页面下载链接
+            is_apikey_site = bool(site is not None and site.apikey)
+
             # 第2步：解析下载链接 + 种子标题/副标题
-            download_urls, page_info = self._extract_download_links(target_url, cookie_str)
+            if is_apikey_site:
+                download_urls, page_info = self._extract_download_links_apikey(
+                    target_url, site, cookie_str
+                )
+            else:
+                download_urls, page_info = self._extract_download_links(target_url, cookie_str)
             if not download_urls:
                 self._reply(event_data, f"⚠️ 未在页面中找到下载链接。\n页面：{target_url}")
                 return
@@ -158,11 +173,12 @@ class WechatDownload(_PluginBase):
             if final_save_path != save_path:
                 logger.info(f"[微信添加种子] 保存目录自动设置为：{final_save_path}")
 
-            # 第6步：提交到下载器
+            # 第6步：提交到下载器（APIKey 站点的下载链自带 downhash 鉴权，不传 cookie）
+            dl_cookie = "" if is_apikey_site else cookie_str
             success_list = []
             fail_list = []
             for durl in download_urls:
-                if self._add_to_downloader(durl, final_save_path, cookie_str):
+                if self._add_to_downloader(durl, final_save_path, dl_cookie):
                     success_list.append(durl)
                 else:
                     fail_list.append(durl)
@@ -223,6 +239,140 @@ class WechatDownload(_PluginBase):
         except Exception as e:
             logger.error(f"[微信添加种子] 获取 CookieCloud Cookie 失败：{e}")
             return ""
+
+    # ========== 站点表查询 ==========
+    @staticmethod
+    def _get_site_info(hostname: str):
+        """
+        按域名查询 MoviePilot 站点表，返回站点对象（含 cookie/apikey/ua/url），无则 None。
+        站点表 domain 多为裸域名，先精确匹配，再剥去 www./子域前缀重试。
+        """
+        if not hostname:
+            return None
+        try:
+            from app.db.site_oper import SiteOper
+
+            oper = SiteOper()
+            site = oper.get_by_domain(hostname)
+            if site:
+                return site
+            # 剥 www 前缀重试（如 www.hddolby.com -> hddolby.com）
+            if hostname.lower().startswith("www."):
+                site = oper.get_by_domain(hostname[4:])
+                if site:
+                    return site
+            # 按后缀匹配任意站点域名（如 test.hddolby.com 匹配 hddolby.com）
+            for s in oper.list():
+                d = (s.domain or "").lower()
+                if d and (hostname.lower() == d or hostname.lower().endswith(f".{d}")):
+                    return s
+            return None
+        except Exception as e:
+            logger.warning(f"[微信添加种子] 查询站点信息失败：{e}")
+            return None
+
+    # ========== APIKey 站点（如 HDDolby）解析下载链接 ==========
+    def _extract_download_links_apikey(self, url: str, site, cookie_str: str) -> Tuple[List[str], Dict[str, Any]]:
+        """
+        针对使用 API Key 访问的站点（如 HDDolby）：
+        1. 打开详情页提取种子标题；
+        2. 调用站点官方 API（x-api-key）按标题搜索，匹配同 id 种子获取 downhash；
+        3. 构造带 downhash 的下载链 download.php?id={id}&downhash={downhash}。
+        参考 MoviePilot 官方 HddolbySpider 实现。
+        :return: (下载链接列表, 页面信息字典)
+        """
+        from app.utils.http import RequestUtils
+        from app.utils.string import StringUtils
+
+        if site is None or not getattr(site, "apikey", None):
+            logger.warning("[微信添加种子] APIKey 站点信息缺失，无法走 API 分支")
+            return [], page_info if page_info else {}
+
+        # ---- 详情页提取种子标题 ----
+        page_info: Dict[str, Any] = {}
+        title = ""
+        try:
+            res = RequestUtils(
+                cookies=cookie_str or None,
+                ua=getattr(site, "ua", None) or None,
+                timeout=self._timeout,
+            ).get_res(url=url)
+            if res is None or res.status_code != 200:
+                raise RuntimeError(f"详情页访问失败：{res.status_code if res else '无法连接'}")
+            soup = BeautifulSoup(res.text, "html.parser")
+            page_info = self._parse_page_info(soup)
+            title = page_info.get("torrent_name") or page_info.get("title") or ""
+        except Exception as e:
+            logger.error(f"[微信添加种子] APIKey 站点详情页解析失败：{e}")
+            raise RuntimeError(f"访问页面失败：{e}")
+
+        if not title:
+            logger.warning("[微信添加种子] APIKey 站点未能提取种子标题")
+            return [], page_info
+
+        # ---- 从 URL 提取种子 id ----
+        m = re.search(r"[?&]id=(\d+)", url)
+        if not m:
+            logger.warning(f"[微信添加种子] URL 中未找到种子 id：{url}")
+            return [], page_info
+        torrent_id = int(m.group(1))
+
+        # ---- 调用站点 API 搜索 ----
+        domain_host = StringUtils.get_url_domain(getattr(site, "domain", "") or "")
+        if not domain_host:
+            domain_host = urlparse(url).hostname or ""
+        api_url = f"https://api.{domain_host}/api/v1/torrent/search"
+        params = {"keyword": title, "page_number": 0, "page_size": 50, "visible": 1}
+        try:
+            api_res = RequestUtils(
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/plain, */*",
+                    "x-api-key": site.apikey,
+                },
+                timeout=self._timeout,
+            ).post_res(url=api_url, json=params)
+        except Exception as e:
+            logger.error(f"[微信添加种子] 站点 API 请求失败：{e}")
+            return [], page_info
+
+        if api_res is None or api_res.status_code != 200:
+            logger.warning(
+                f"[微信添加种子] 站点 API 搜索失败：{api_res.status_code if api_res else '无法连接'}"
+            )
+            return [], page_info
+
+        try:
+            result = api_res.json()
+        except Exception as e:
+            logger.error(f"[微信添加种子] 站点 API 响应解析失败：{e}")
+            return [], page_info
+        if result.get("error"):
+            logger.warning(
+                f"[微信添加种子] 站点 API 返回错误：{result.get('error').get('message')}"
+            )
+            return [], page_info
+
+        # ---- 匹配同 id 种子，取 downhash ----
+        downhash = ""
+        for t in result.get("data") or []:
+            if int(t.get("id") or 0) == torrent_id:
+                downhash = t.get("downhash") or ""
+                # 补充 API 提供的副标题（详情页取不到时）
+                if not page_info.get("subtitle") or page_info.get("subtitle") == title:
+                    api_sub = self._clean_text(t.get("small_descr") or "")
+                    if api_sub:
+                        page_info["subtitle"] = api_sub
+                break
+
+        if not downhash:
+            logger.warning(f"[微信添加种子] API 未匹配到种子 id={torrent_id} 的 downhash")
+            return [], page_info
+
+        base = (getattr(site, "url", "") or f"https://{domain_host}/").rstrip("/")
+        download_url = f"{base}/download.php?id={torrent_id}&downhash={downhash}"
+        logger.info(f"[微信添加种子] APIKey 站点构造下载链接：{download_url[:80]}...")
+        return [download_url], page_info
 
     # ========== 解析下载链接 ==========
     def _extract_download_links(self, url: str, cookie_str: str) -> Tuple[List[str], Dict[str, Any]]:
