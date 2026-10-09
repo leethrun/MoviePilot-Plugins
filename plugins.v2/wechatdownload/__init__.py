@@ -17,7 +17,7 @@ class WechatDownload(_PluginBase):
     plugin_name = "微信添加种子"
     plugin_desc = "在微信中发送「/下载 URL [保存目录]」，快捷添加任务到下载器，可指定下载目录。也可使用 /xz /download 命令,使用方法同 /下载"
     plugin_icon = "wechatdownload.png"
-    plugin_version = "1.2.3"
+    plugin_version = "1.2.4"
     plugin_author = "leethrun"
     author_url = "https://github.com/leethrun"
     plugin_config_prefix = "wechatdownload_"
@@ -290,7 +290,7 @@ class WechatDownload(_PluginBase):
 
         # ---- 详情页提取种子标题 ----
         page_info: Dict[str, Any] = {}
-        title = ""
+        keywords: List[str] = []
         try:
             res = RequestUtils(
                 cookies=cookie_str or None,
@@ -301,12 +301,17 @@ class WechatDownload(_PluginBase):
                 raise RuntimeError(f"详情页访问失败：{res.status_code if res else '无法连接'}")
             soup = BeautifulSoup(res.text, "html.parser")
             page_info = self._parse_page_info(soup)
-            title = page_info.get("torrent_name") or page_info.get("title") or ""
+            # 搜索关键词候选（torrent_name 已去促销尾巴，title 为展示名，双保险）
+            torrent_name = page_info.get("torrent_name") or ""
+            show_title = page_info.get("title") or ""
+            for kw in (torrent_name, show_title):
+                if kw and kw not in keywords:
+                    keywords.append(kw)
         except Exception as e:
             logger.error(f"[微信添加种子] APIKey 站点详情页解析失败：{e}")
             raise RuntimeError(f"访问页面失败：{e}")
 
-        if not title:
+        if not keywords:
             logger.warning("[微信添加种子] APIKey 站点未能提取种子标题")
             return [], page_info
 
@@ -317,53 +322,63 @@ class WechatDownload(_PluginBase):
             return [], page_info
         torrent_id = int(m.group(1))
 
-        # ---- 调用站点 API 搜索 ----
+        # ---- 调用站点 API 搜索（多关键词依次尝试） ----
         domain_host = StringUtils.get_url_domain(getattr(site, "domain", "") or "")
         if not domain_host:
             domain_host = urlparse(url).hostname or ""
         api_url = f"https://api.{domain_host}/api/v1/torrent/search"
-        params = {"keyword": title, "page_number": 0, "page_size": 50, "visible": 1}
-        try:
-            api_res = RequestUtils(
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/plain, */*",
-                    "x-api-key": site.apikey,
-                },
-                timeout=self._timeout,
-            ).post_res(url=api_url, json=params)
-        except Exception as e:
-            logger.error(f"[微信添加种子] 站点 API 请求失败：{e}")
-            return [], page_info
 
-        if api_res is None or api_res.status_code != 200:
-            logger.warning(
-                f"[微信添加种子] 站点 API 搜索失败：{api_res.status_code if api_res else '无法连接'}"
-            )
-            return [], page_info
-
-        try:
-            result = api_res.json()
-        except Exception as e:
-            logger.error(f"[微信添加种子] 站点 API 响应解析失败：{e}")
-            return [], page_info
-        if result.get("error"):
-            logger.warning(
-                f"[微信添加种子] 站点 API 返回错误：{result.get('error').get('message')}"
-            )
-            return [], page_info
+        def _api_search(keyword: str):
+            """调用站点 API 搜索，返回 data 列表；失败/异常返回 None"""
+            params = {"keyword": keyword, "page_number": 0, "page_size": 50, "visible": 1}
+            try:
+                api_res = RequestUtils(
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/plain, */*",
+                        "x-api-key": site.apikey,
+                    },
+                    timeout=self._timeout,
+                ).post_res(url=api_url, json=params)
+            except Exception as e:
+                logger.error(f"[微信添加种子] 站点 API 请求失败：{e}")
+                return None
+            if api_res is None or api_res.status_code != 200:
+                logger.warning(
+                    f"[微信添加种子] 站点 API 搜索失败：{api_res.status_code if api_res else '无法连接'}"
+                )
+                return None
+            try:
+                result = api_res.json()
+            except Exception as e:
+                logger.error(f"[微信添加种子] 站点 API 响应解析失败：{e}")
+                return None
+            if result.get("error"):
+                logger.warning(
+                    f"[微信添加种子] 站点 API 返回错误：{result.get('error').get('message')}"
+                )
+                return None
+            return result.get("data") or []
 
         # ---- 匹配同 id 种子，取 downhash ----
         downhash = ""
-        for t in result.get("data") or []:
-            if int(t.get("id") or 0) == torrent_id:
-                downhash = t.get("downhash") or ""
-                # 补充 API 提供的副标题（详情页取不到时）
-                if not page_info.get("subtitle") or page_info.get("subtitle") == title:
-                    api_sub = self._clean_text(t.get("small_descr") or "")
-                    if api_sub:
-                        page_info["subtitle"] = api_sub
+        data_list: List[dict] = []
+        for kw in keywords:
+            data_list = _api_search(kw) or []
+            for t in data_list:
+                if int(t.get("id") or 0) == torrent_id:
+                    downhash = t.get("downhash") or ""
+                    # 补充 API 提供的副标题（详情页取不到时）
+                    if not page_info.get("subtitle") or page_info.get("subtitle") in (
+                        page_info.get("title"), keywords[0],
+                    ):
+                        api_sub = self._clean_text(t.get("small_descr") or "")
+                        if api_sub:
+                            page_info["subtitle"] = api_sub
+                    break
+            if downhash:
                 break
+            logger.info(f"[微信添加种子] API 关键词「{kw[:40]}」未命中 id={torrent_id}，尝试下一个")
 
         if not downhash:
             logger.warning(f"[微信添加种子] API 未匹配到种子 id={torrent_id} 的 downhash")
@@ -437,6 +452,26 @@ class WechatDownload(_PluginBase):
         cleaned = re.sub(r"\s+", " ", text).strip()
         return cleaned[:max_len] + ("..." if len(cleaned) > max_len else "")
 
+    @staticmethod
+    def _strip_promo_tail(text: str) -> str:
+        """
+        去掉标题尾部的促销/进度信息，如：
+        [50%]、[免费]、[免費]、[限免]、[促销]、[详]、[POST]、[编辑推荐] 等
+        及其后的 剩余时间/剩余/免费剩余 等 倒计时文本。
+        """
+        if not text:
+            return text
+        # 形如 "...XXX[免费]剩余时间：1天7时" / "...XXX[50%]剩余时间..."：截掉首个"促销括号+其后全部"
+        m = re.search(
+            r"\[[^\[\]]{1,12}\]\s*(?:剩余时间|剩余|免费剩余|限时).*$",
+            text,
+        )
+        if m:
+            return text[: m.start()].rstrip()
+        # 形如 "...XXX[50%]" / "...XXX[免费]"（括号后无倒计时）：剥掉尾部连续的方括号块
+        stripped = re.sub(r"(?:\s*\[[^\[\]]{1,12}\])+\s*$", "", text)
+        return stripped.rstrip()
+
     def _parse_page_info(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """
         从详情页提取种子信息（NexusPHP 结构为主，多级回退）。
@@ -450,12 +485,11 @@ class WechatDownload(_PluginBase):
         m = re.search(r'"([^"]{5,})"', page_title)
         if m:
             title = self._clean_text(m.group(1), 200)
-        # 优先级2：h1，去掉 [50%]剩余时间 之类的促销进度尾巴
+        # 优先级2：h1，去掉 [50%]/[免费] 等促销尾巴
         if not title:
             h1 = soup.find("h1")
             if h1:
-                h1_text = re.split(r"\[\d+%?\]", h1.get_text(strip=True))[0]
-                title = self._clean_text(h1_text, 200)
+                title = self._clean_text(self._strip_promo_tail(h1.get_text(strip=True)), 200)
         # 优先级3：<title> 按 " :: " 拆分（旧格式：种子名 :: 站点名）
         if not title and page_title:
             title = self._clean_text(page_title.split("::")[0], 200)
@@ -465,7 +499,7 @@ class WechatDownload(_PluginBase):
         h1 = soup.find("h1")
         if h1:
             torrent_name = self._clean_text(
-                re.split(r"\[\d+%?\]", h1.get_text(strip=True))[0], 300
+                self._strip_promo_tail(h1.get_text(strip=True)), 300
             )
         if not torrent_name:
             torrent_name = title
